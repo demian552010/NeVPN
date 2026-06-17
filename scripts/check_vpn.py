@@ -3,13 +3,15 @@ import re
 import socket
 import base64
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ===== НАСТРОЙКИ =====
-CONFIG_FILE = "vpn-configs"          # файл с конфигами
+CONFIG_FILE = "vpn-configs"          # файл с конфигами (в корне)
 OUTPUT_FILE = "working_configs.txt"   # результат
-TIMEOUT = 10                          # таймаут на подключение (сек) – увеличен до 10
-MAX_WORKERS = 20                      # параллельных проверок
+TIMEOUT = 10                          # таймаут на подключение (сек)
+MAX_WORKERS = 30                      # параллельных проверок (можно увеличить)
+TOP_N = 5                             # сколько лучших конфигов сохранять
 # =====================
 
 def extract_host_port(line):
@@ -24,11 +26,12 @@ def extract_host_port(line):
 
     # --- VLESS, Trojan, Hysteria2 ---
     if line.startswith(('vless://', 'trojan://', 'hysteria2://')):
+        # Ищем часть после @ до ? или # или конца строки
         match = re.search(r'@([^?#]+)', line)
         if match:
             host_port = match.group(1)
             if ':' in host_port:
-                if host_port.startswith('['):  # IPv6 в квадратных скобках
+                if host_port.startswith('['):  # IPv6 в скобках
                     bracket_end = host_port.index(']')
                     host = host_port[1:bracket_end]
                     port_str = host_port[bracket_end+2:]
@@ -57,23 +60,32 @@ def extract_host_port(line):
 
     return None, None
 
-def check_tcp_port(host, port):
-    """Проверяет доступность TCP-порта (без ограничения по задержке)."""
+def measure_latency(host, port):
+    """
+    Измеряет время установки TCP-соединения в миллисекундах.
+    Возвращает float (мс) или None при ошибке/таймауте.
+    """
     try:
+        start = time.time()
         with socket.create_connection((host, port), timeout=TIMEOUT):
-            return True
+            elapsed = (time.time() - start) * 1000
+            return elapsed
     except Exception:
-        return False
+        return None
 
 def check_line(idx, line):
-    """Проверяет одну строку: парсит и пробует соединиться."""
+    """Проверяет одну строку: парсит, измеряет задержку."""
     host, port = extract_host_port(line)
     if not host or not port:
         return None  # не удалось распарсить
-    ok = check_tcp_port(host, port)
-    status = "✅" if ok else "❌"
-    print(f"{status} Строка {idx+1}: {host}:{port}")
-    return (idx, line.strip()) if ok else None
+
+    latency = measure_latency(host, port)
+    if latency is None:
+        # print(f"❌ Строка {idx+1}: {host}:{port} (таймаут)")
+        return None
+    else:
+        # print(f"✅ Строка {idx+1}: {host}:{port} ({latency:.0f} мс)")
+        return (idx, line.strip(), latency)   # сохраняем индекс, строку и задержку
 
 def main():
     if not os.path.exists(CONFIG_FILE):
@@ -83,32 +95,39 @@ def main():
     with open(CONFIG_FILE, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
 
-    # Убираем пустые строки и комментарии для подсчёта, но сохраняем индексы
-    # Проверяем только непустые строки
-    print(f"Всего строк в файле: {len(lines)}")
-    print(f"Начинаем проверку (таймаут {TIMEOUT} сек)...")
+    total_lines = len(lines)
+    print(f"📄 Всего строк в файле: {total_lines}")
+    print(f"⏳ Начинаем проверку (таймаут {TIMEOUT} сек, параллельно {MAX_WORKERS} потоков)...")
 
-    working = []  # список (index, line)
+    results = []  # список (idx, line, latency)
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {}
         for idx, line in enumerate(lines):
-            # Пропускаем пустые или комментарии, но можно проверять любые
             if line.strip() and not line.strip().startswith('#'):
                 futures[executor.submit(check_line, idx, line)] = idx
+        # Ждём завершения всех задач
         for future in as_completed(futures):
-            result = future.result()
-            if result:
-                working.append(result)
+            res = future.result()
+            if res is not None:
+                results.append(res)
 
-    # Сортируем по индексу
-    working.sort(key=lambda x: x[0])
+    # Сортируем по задержке (возрастание)
+    results.sort(key=lambda x: x[2])
 
-    # Записываем строки конфигураций
+    # Берём ТОП-N
+    top = results[:TOP_N]
+
+    # Выводим статистику
+    print(f"✅ Проверено строк: {len(results)}")
+    print(f"🏆 Лучшие {len(top)} конфигураций по пингу:")
+
+    # Записываем только строки конфигураций (без задержек)
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
-        for _, line in working:
+        for idx, line, latency in top:
             f.write(line + '\n')
+            print(f"   {latency:.0f} мс -> {line[:60]}...")
 
-    print(f"✅ Готово. Рабочих конфигураций: {len(working)}. Файл {OUTPUT_FILE} обновлён.")
+    print(f"💾 Файл {OUTPUT_FILE} обновлён (сохранено {len(top)} конфигов).")
 
 if __name__ == "__main__":
     main()
