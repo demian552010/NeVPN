@@ -3,14 +3,12 @@ import re
 import socket
 import base64
 import json
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ===== НАСТРОЙКИ =====
-CONFIG_FILE = "vpn-configs"          # файл с конфигами (в корне)
+CONFIG_FILE = "vpn-configs"          # файл с конфигами
 OUTPUT_FILE = "working_configs.txt"   # результат
-TIMEOUT = 3                           # таймаут на подключение (сек)
-MAX_LATENCY = 700                     # максимальная задержка в миллисекундах
+TIMEOUT = 10                          # таймаут на подключение (сек) – увеличен до 10
 MAX_WORKERS = 20                      # параллельных проверок
 # =====================
 
@@ -46,7 +44,7 @@ def extract_host_port(line):
     if line.startswith('vmess://'):
         try:
             b64 = line[len('vmess://'):]
-            b64 += '=' * (-len(b64) % 4)  # паддинг
+            b64 += '=' * (-len(b64) % 4)
             decoded = base64.b64decode(b64).decode('utf-8')
             data = json.loads(decoded)
             host = data.get('add')
@@ -59,35 +57,23 @@ def extract_host_port(line):
 
     return None, None
 
-def check_latency(host, port):
-    """
-    Измеряет время установки TCP-соединения в миллисекундах.
-    Возвращает float (мс) или None при ошибке/таймауте.
-    """
+def check_tcp_port(host, port):
+    """Проверяет доступность TCP-порта (без ограничения по задержке)."""
     try:
-        start = time.time()
         with socket.create_connection((host, port), timeout=TIMEOUT):
-            elapsed = (time.time() - start) * 1000
-            return elapsed
+            return True
     except Exception:
-        return None
+        return False
 
-def check_line_with_index(idx, line):
-    """Проверяет одну строку: извлекает хост:порт, измеряет задержку."""
+def check_line(idx, line):
+    """Проверяет одну строку: парсит и пробует соединиться."""
     host, port = extract_host_port(line)
     if not host or not port:
         return None  # не удалось распарсить
-
-    latency = check_latency(host, port)
-    if latency is None:
-        print(f"❌ Строка {idx+1}: {host}:{port} (таймаут)")
-        return None
-    if latency <= MAX_LATENCY:
-        print(f"✅ Строка {idx+1}: {host}:{port} ({latency:.0f} мс)")
-        return (idx, line.strip())   # сохраняем индекс и саму строку
-    else:
-        print(f"⚠️ Строка {idx+1}: {host}:{port} ({latency:.0f} мс) > {MAX_LATENCY} мс")
-        return None
+    ok = check_tcp_port(host, port)
+    status = "✅" if ok else "❌"
+    print(f"{status} Строка {idx+1}: {host}:{port}")
+    return (idx, line.strip()) if ok else None
 
 def main():
     if not os.path.exists(CONFIG_FILE):
@@ -97,22 +83,27 @@ def main():
     with open(CONFIG_FILE, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
 
-    print(f"Найдено {len(lines)} строк. Проверяем рабочие конфигурации (задержка ≤ {MAX_LATENCY} мс)...")
+    # Убираем пустые строки и комментарии для подсчёта, но сохраняем индексы
+    # Проверяем только непустые строки
+    print(f"Всего строк в файле: {len(lines)}")
+    print(f"Начинаем проверку (таймаут {TIMEOUT} сек)...")
 
     working = []  # список (index, line)
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {}
         for idx, line in enumerate(lines):
-            futures[executor.submit(check_line_with_index, idx, line)] = idx
+            # Пропускаем пустые или комментарии, но можно проверять любые
+            if line.strip() and not line.strip().startswith('#'):
+                futures[executor.submit(check_line, idx, line)] = idx
         for future in as_completed(futures):
             result = future.result()
             if result:
                 working.append(result)
 
-    # Сортируем по индексу, чтобы сохранить порядок в исходном файле
+    # Сортируем по индексу
     working.sort(key=lambda x: x[0])
 
-    # Записываем только строки конфигураций
+    # Записываем строки конфигураций
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         for _, line in working:
             f.write(line + '\n')
