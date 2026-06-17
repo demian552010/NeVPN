@@ -3,12 +3,16 @@ import re
 import socket
 import base64
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-CONFIG_FILE = "vpn-configs"          # ваш файл с конфигами (в корне)
+# ===== НАСТРОЙКИ =====
+CONFIG_FILE = "vpn-configs"          # файл с конфигами (в корне)
 OUTPUT_FILE = "working_configs.txt"   # результат
-TIMEOUT = 3                           # секунды на проверку порта
-MAX_WORKERS = 20                      # количество параллельных проверок
+TIMEOUT = 3                           # таймаут на подключение (сек)
+MAX_LATENCY = 700                     # максимальная задержка в миллисекундах
+MAX_WORKERS = 20                      # параллельных проверок
+# =====================
 
 def extract_host_port(line):
     """
@@ -22,22 +26,17 @@ def extract_host_port(line):
 
     # --- VLESS, Trojan, Hysteria2 ---
     if line.startswith(('vless://', 'trojan://', 'hysteria2://')):
-        # Ищем часть после @ до ? или # или конца строки
         match = re.search(r'@([^?#]+)', line)
         if match:
             host_port = match.group(1)
-            # Разделяем хост и порт (может быть IPv6 в квадратных скобках)
             if ':' in host_port:
-                # Проверяем, не IPv6 ли это с квадратными скобками
-                if host_port.startswith('['):
-                    # Пример: [2001:db8::1]:443
+                if host_port.startswith('['):  # IPv6 в квадратных скобках
                     bracket_end = host_port.index(']')
                     host = host_port[1:bracket_end]
-                    port_str = host_port[bracket_end+2:]  # после ]:
+                    port_str = host_port[bracket_end+2:]
                     if port_str.isdigit():
                         return host, int(port_str)
                 else:
-                    # Обычный IPv4 или домен: хост:порт
                     parts = host_port.rsplit(':', 1)
                     if len(parts) == 2 and parts[1].isdigit():
                         return parts[0], int(parts[1])
@@ -47,7 +46,7 @@ def extract_host_port(line):
     if line.startswith('vmess://'):
         try:
             b64 = line[len('vmess://'):]
-            b64 += '=' * (-len(b64) % 4)  # добавляем паддинг
+            b64 += '=' * (-len(b64) % 4)  # паддинг
             decoded = base64.b64decode(b64).decode('utf-8')
             data = json.loads(decoded)
             host = data.get('add')
@@ -58,26 +57,37 @@ def extract_host_port(line):
             pass
         return None, None
 
-    # Если строка другого формата – пропускаем
     return None, None
 
-def check_tcp_port(host, port):
-    """Проверяет доступность TCP-порта (таймаут 3 сек)."""
+def check_latency(host, port):
+    """
+    Измеряет время установки TCP-соединения в миллисекундах.
+    Возвращает float (мс) или None при ошибке/таймауте.
+    """
     try:
+        start = time.time()
         with socket.create_connection((host, port), timeout=TIMEOUT):
-            return True
+            elapsed = (time.time() - start) * 1000
+            return elapsed
     except Exception:
-        return False
+        return None
 
-def check_line(index, line):
-    """Проверяет одну строку конфигурации."""
+def check_line_with_index(idx, line):
+    """Проверяет одну строку: извлекает хост:порт, измеряет задержку."""
     host, port = extract_host_port(line)
     if not host or not port:
+        return None  # не удалось распарсить
+
+    latency = check_latency(host, port)
+    if latency is None:
+        print(f"❌ Строка {idx+1}: {host}:{port} (таймаут)")
         return None
-    ok = check_tcp_port(host, port)
-    status = "✅" if ok else "❌"
-    print(f"{status} Строка {index+1} -> {host}:{port}")
-    return index+1 if ok else None
+    if latency <= MAX_LATENCY:
+        print(f"✅ Строка {idx+1}: {host}:{port} ({latency:.0f} мс)")
+        return (idx, line.strip())   # сохраняем индекс и саму строку
+    else:
+        print(f"⚠️ Строка {idx+1}: {host}:{port} ({latency:.0f} мс) > {MAX_LATENCY} мс")
+        return None
 
 def main():
     if not os.path.exists(CONFIG_FILE):
@@ -87,25 +97,27 @@ def main():
     with open(CONFIG_FILE, 'r', encoding='utf-8', errors='ignore') as f:
         lines = f.readlines()
 
-    print(f"Найдено {len(lines)} строк. Проверяем рабочие конфигурации...")
+    print(f"Найдено {len(lines)} строк. Проверяем рабочие конфигурации (задержка ≤ {MAX_LATENCY} мс)...")
 
-    working_indices = []
+    working = []  # список (index, line)
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(check_line, i, line): i for i, line in enumerate(lines)}
+        futures = {}
+        for idx, line in enumerate(lines):
+            futures[executor.submit(check_line_with_index, idx, line)] = idx
         for future in as_completed(futures):
             result = future.result()
             if result:
-                working_indices.append(result)
+                working.append(result)
 
-    working_indices.sort()
+    # Сортируем по индексу, чтобы сохранить порядок в исходном файле
+    working.sort(key=lambda x: x[0])
+
+    # Записываем только строки конфигураций
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
-        for idx in working_indices:
-            # Сохраняем номера строк (нумерация с 1)
-            f.write(f"Line {idx}\n")
-            # Если хотите сохранять сами строки, замените на:
-            # f.write(lines[idx-1].strip() + '\n')
+        for _, line in working:
+            f.write(line + '\n')
 
-    print(f"✅ Готово. Рабочих строк: {len(working_indices)}. Файл {OUTPUT_FILE} обновлён.")
+    print(f"✅ Готово. Рабочих конфигураций: {len(working)}. Файл {OUTPUT_FILE} обновлён.")
 
 if __name__ == "__main__":
     main()
