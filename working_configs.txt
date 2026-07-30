@@ -1,5 +1,5 @@
-vless://cabbfe13-038b-4dbb-9c45-5079c829abfa@151.101.0.1:80?path=%2F&amp;security=none&amp;encryption=none&amp;host=max-gb1.global.ssl.fastly.net&amp;type=ws#%40FarazV2ray
-vless://0058c215-ab1e-400c-a403-b5b2fda7e846@151.101.2.219:80?path=%2F&amp;security=none&amp;encryption=none&amp;host=max-gb1.global.ssl.fastly.net&amp;type=ws#Free%24%2076%20%40Outline_Vpn
-trojan://mitivpn@188.114.97.6:443?sni=2.1.mitivpn.dee.srfsl.gleobal.fastl3y.n3et.mitivpn.site#@Hope_Net-join-us-on-Telegram
+vless://cabbfe13-038b-4dbb-9c45-5079c829abfa@151.101.66.219:80?path=%2F&amp;security=none&amp;encryption=none&amp;host=max-gb1.global.ssl.fastly.net&amp;type=ws#%40FarazV2ray
+vless://9ce76da7-91be-407e-b7f1-e1409db72325@199.232.78.159:443?path=%2F&amp;security=tls&amp;encryption=none&amp;insecure=0&amp;host=lsjaoijji.global.ssl.fastly.net.&amp;type=ws&amp;allowInsecure=0&amp;sni=default.ssl.fastly.net#telegram%20%40mtmvpn
+vless://TIGNAL-CRYPTO@151.101.129.57:80?mode=auto&amp;path=%2F&amp;security=none&amp;encryption=none&amp;host=InternetAzadRobot07gt745.global.ssl.fastly.net&amp;type=xhttp#%40prrofile_purple%20%20%E2%99%A5%EF%B8%8F%F0%9F%91%88%20%D8%AA%D9%84%DA%AF%D8%B1%D8%A7%D9%85
 vless://0c09799a-47ca-494e-a50e-828632ef9d81@199.232.78.159:443?path=%2F&amp;security=tls&amp;encryption=none&amp;insecure=0&amp;host=bazaryabab.global.ssl.fastly.net&amp;type=ws&amp;allowInsecure=0&amp;sni=default.ssl.fastly.net#telegram%20%40mtmvpn
-vless://30f2d443-af46-4dd6-83c9-b5e17299ebd2@172.64.151.232:443?path=%2F&amp;security=tls&amp;encryption=none&amp;host=carlotta.shoorekeeper.cloudns.org&amp;type=ws&amp;sni=carlotta.shoorekeeper.cloudns.org#%40configfree20255
+vless://0058c215-ab1e-400c-a403-b5b2fda7e846@151.101.2.219:80?path=%2F&amp;security=none&amp;encryption=none&amp;host=max-gb1.global.ssl.fastly.net&amp;type=ws#Free%24%2076%20%40Outline_Vpn
